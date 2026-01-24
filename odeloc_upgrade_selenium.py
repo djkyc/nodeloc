@@ -5,7 +5,7 @@ NodeLoc 快速升级脚本 - Selenium 版本（用户名密码登录）
 功能: 自动签到 + 浏览主题 + 阅读帖子 + 点赞 + 回复
 目标: 快速满足 TL0 → TL1 → TL2 升级条件
 适配青龙面板 ARM Docker 环境
-作者: Antigravity
+作者: djkyc
 版本: 3.0
 """
 
