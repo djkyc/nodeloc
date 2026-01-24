@@ -1,5 +1,5 @@
 # nodeloc
-docker 青龙定时升级L3
+docker 青龙定时L0升级L3
 # NodeLoc 快速升级脚本使用指南（Selenium 版本）
 
 ## 📋 版本说明
@@ -58,6 +58,7 @@ apk-get install -y chromium chromium-driver
 - **定时规则**：`0 9 * * *`（每天早上 9 点）
 ---
 青龙面板使用
+
 注意：如果是docker容器创建的青龙，请使用whyour/qinglong:debian镜像，latest（alpine）版本可能无法安装部分依赖
 
 依赖安装
@@ -90,7 +91,7 @@ apk-get install -y chromium chromium-driver
 
 类型：公开仓库
 
-链接：https://github.com/doveppp/linuxdo-checkin.git
+链接：https://github.com/djkyc/nodeloc.git
 
 分支：main
 
