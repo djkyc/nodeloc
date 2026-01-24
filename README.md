@@ -20,7 +20,9 @@ docker 青龙定时升级L3
 
 ### 1. 安装依赖
 
-在青龙面板终端执行：
+在青龙面板终端ssh 执行：
+
+
 
 ```bash
 # 安装 Python 依赖
@@ -52,9 +54,61 @@ apk-get install -y chromium chromium-driver
 在青龙面板 **定时任务** 中添加：
 
 - **名称**：NodeLoc 快速升级（Selenium）
-- **命令**：`python3 /ql/scripts/nodeloc_upgrade_selenium.py`
+- **命令**：`task /ql/data/scripts/nodeloc_upgrade_selenium.py`
 - **定时规则**：`0 9 * * *`（每天早上 9 点）
+---
+青龙面板使用
+注意：如果是docker容器创建的青龙，请使用whyour/qinglong:debian镜像，latest（alpine）版本可能无法安装部分依赖
 
+依赖安装
+
+## 第二种方法：安装Python依赖
+
+进入青龙面板 -> 依赖管理 -> 安装依赖
+依赖类型选择python3
+自动拆分选择 是
+
+名称填写
+`loguru curl-cffi selenium`
+
+点击确定
+
+## 安装 linux chromium 依赖
+
+青龙面板 -> 依赖管理 -> 安装Linux依赖
+
+名称填`chromium`
+
+若安装失败，可能需要执行apt update更新索引（若使用docker则需进入docker容器执行）
+添加仓库
+
+## 进入青龙面板 -> 订阅管理 -> 创建订阅
+
+依次在对应的字段填入内容（未提及的不填）：
+
+名称：nodeloc签到升级
+
+类型：公开仓库
+
+链接：https://github.com/doveppp/linuxdo-checkin.git
+
+分支：main
+
+定时类型：crontab
+
+定时规则(拉取上游代码的时间，一天二次，可以自由调整频率): 0 9 * * * /0 21 * * *    #-早晚上一次
+
+配置环境变量
+
+进入青龙面板 -> 环境变量 -> 创建变量
+
+需要配置以下变量：
+
+`NODELOC_USERNAME` #不是登陆用户名---可进网站查你取的名字。
+
+`NODELOC_PASSWORD` 登陆密码
+
+---
 ## ⚙️ 配置调整
 
 ### 每日任务量配置
