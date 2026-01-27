@@ -6,13 +6,15 @@ NodeLoc 快速升级脚本 - Selenium 版本（用户名密码登录）
 目标: 快速满足 TL0 → TL1 → TL2 升级条件
 适配青龙面板 ARM Docker 环境
 作者: djkyc
-版本: 3.0
+版本: 3.0.2
 """
 
 import os
 import time
 import random
+import re
 import traceback
+import functools
 from loguru import logger
 from curl_cffi import requests
 from selenium import webdriver
@@ -29,13 +31,30 @@ CSRF_URL = "https://www.nodeloc.com/session/csrf"
 DEBUG_HTML = "/ql/data/scripts/nodeloc_upgrade_debug.html"
 DEBUG_PNG = "/ql/data/scripts/nodeloc_upgrade_debug.png"
 
+# 通知配置
+GOTIFY_URL = os.environ.get("GOTIFY_URL")  # Gotify 服务器地址
+GOTIFY_TOKEN = os.environ.get("GOTIFY_TOKEN")  # Gotify Token
+SC3_PUSH_KEY = os.environ.get("SC3_PUSH_KEY")  # Server酱³ SendKey
+WECHAT_API_URL = os.environ.get("WECHAT_API_URL")   # 自定义微信地址+wxsend API 地址 https://wx.djcf.pp.ua/wxsend
+WECHAT_AUTH_TOKEN = os.environ.get("WECHAT_AUTH_TOKEN") # 自定义微信 Token(可参考饭奇俊微信视频CF搭一个)
+
+# 代理配置 (优先读取 NODELOC_PROXY，其次尝试 LINUXDO_PROXY 或 HTTP_PROXY)
+NODELOC_PROXY = os.environ.get("NODELOC_PROXY") or os.environ.get("LINUXDO_PROXY") or os.environ.get("HTTP_PROXY")
+
+# 关键修复: 如果使用了代理，必须设置 no_proxy 排除 localhost，否则 Selenium 无法连接 ChromeDriver
+if NODELOC_PROXY:
+    os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
+    os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
+    logger.info(f"已启用代理配置: {NODELOC_PROXY}")
+    logger.info("已设置 NO_PROXY 环境变量以保护本地 WebDriver 连接")
+
 # ================== 升级配置 ==================
-# 每日任务配置（避免过度操作被封号）
+# 每日任务配置（加速版 - 快速升级）
 DAILY_TASKS = {
-    "topics_to_browse": 20,        # 每日浏览主题数
-    "posts_to_read": 50,           # 每日阅读帖子数
-    "likes_to_give": 10,           # 每日点赞数
-    "replies_to_post": 3,          # 每日回复数（谨慎设置）
+    "topics_to_browse": 30,        # 每日浏览主题数（增加到 30）
+    "posts_to_read": 100,          # 每日阅读帖子数（增加到 100）
+    "likes_to_give": 15,           # 每日点赞数（增加到 15）
+    "replies_to_post": 5,          # 每日回复数（增加到 5）
 }
 
 # 回复内容池（避免重复）
@@ -54,6 +73,27 @@ REPLY_TEMPLATES = [
 ]
 
 
+# ================== 装饰器 ==================
+def retry_decorator(retries=3, delay=1):
+    """重试装饰器"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if attempt == retries - 1:
+                        logger.error(f"函数 {func.__name__} 最终执行失败: {str(e)}")
+                        raise
+                    logger.warning(f"函数 {func.__name__} 第 {attempt + 1}/{retries} 次尝试失败: {str(e)}")
+                    time.sleep(delay)
+            return None
+        return wrapper
+    return decorator
+
+
+# ================== 通知函数 ==================
 def tg_notify(text: str):
     """TG 推送"""
     token = os.environ.get("TG_BOT_TOKEN", "").strip()
@@ -83,6 +123,12 @@ class NodeLocUpgrade:
                 "Accept-Language": "zh-CN,zh;q=0.9",
             }
         )
+        # 配置 API 代理
+        if NODELOC_PROXY:
+            self.session.proxies = {
+                "http": NODELOC_PROXY,
+                "https": NODELOC_PROXY
+            }
 
         self.driver = None
         self.stats = {
@@ -159,6 +205,10 @@ class NodeLocUpgrade:
         options.add_argument("--disable-web-security")
         options.add_argument("--lang=zh-CN")
         options.add_argument("--blink-settings=imagesEnabled=false")
+        
+        # 配置浏览器代理
+        if NODELOC_PROXY:
+            options.add_argument(f"--proxy-server={NODELOC_PROXY}")
         
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
@@ -368,16 +418,35 @@ class NodeLocUpgrade:
             logger.error(f"获取主题列表失败:{e}")
             return []
 
+    @retry_decorator(retries=2, delay=2)
     def browse_topic(self, topic: dict) -> bool:
-        """浏览单个主题"""
+        """浏览单个主题（带智能滚动）"""
         try:
             logger.info(f"浏览主题: {topic['title'][:40]}...")
             self.driver.get(topic["url"])
             self._wait_discourse_ready(timeout=30)
             
-            # 模拟阅读时间
-            read_time = random.uniform(3, 8)
-            time.sleep(read_time)
+            # 智能滚动浏览
+            scroll_times = random.randint(3, 6)
+            for i in range(scroll_times):
+                scroll_distance = random.randint(400, 600)
+                self.driver.execute_script(f"window.scrollBy(0, {scroll_distance})")
+                logger.debug(f"滚动 {i+1}/{scroll_times}: {scroll_distance}px")
+                
+                # 10% 概率提前退出
+                if random.random() < 0.1:
+                    logger.debug("随机提前退出浏览")
+                    break
+                
+                # 检查是否到底部
+                at_bottom = self.driver.execute_script(
+                    "return window.scrollY + window.innerHeight >= document.body.scrollHeight"
+                )
+                if at_bottom:
+                    logger.debug("已到达页面底部")
+                    break
+                
+                time.sleep(random.uniform(1, 3))
             
             self.stats['topics_browsed'] += 1
             self.stats['posts_read'] += 1
@@ -613,6 +682,78 @@ class NodeLocUpgrade:
         logger.info(f"  - 给出点赞: {self.stats['likes_given']}")
         logger.info(f"  - 发布回复: {self.stats['replies_posted']}")
         logger.info(f"{'='*50}\n")
+    
+    def send_notifications(self):
+        """发送多渠道通知"""
+        status_msg = (
+            f"NodeLoc 升级任务完成 ✅\n"
+            f"浏览主题: {self.stats['topics_browsed']}\n"
+            f"阅读帖子: {self.stats['posts_read']}\n"
+            f"给出点赞: {self.stats['likes_given']}\n"
+            f"发布回复: {self.stats['replies_posted']}"
+        )
+        
+        # Telegram 通知
+        tg_notify(status_msg)
+        
+        # Gotify 通知
+        if GOTIFY_URL and GOTIFY_TOKEN:
+            try:
+                response = requests.post(
+                    f"{GOTIFY_URL}/message",
+                    params={"token": GOTIFY_TOKEN},
+                    json={
+                        "title": "NodeLoc 升级任务",
+                        "message": status_msg,
+                        "priority": 5
+                    },
+                    timeout=10,
+                    impersonate="chrome136"
+                )
+                response.raise_for_status()
+                logger.success("✅ Gotify 通知发送成功")
+            except Exception as e:
+                logger.warning(f"⚠️ Gotify 通知发送失败: {e}")
+        
+        # Server 酱³ 通知
+        if SC3_PUSH_KEY:
+            match = re.match(r"sct(\d+)t", SC3_PUSH_KEY, re.I)
+            if not match:
+                logger.warning("⚠️ SC3_PUSH_KEY 格式错误")
+            else:
+                uid = match.group(1)
+                url = f"https://{uid}.push.ft07.com/send/{SC3_PUSH_KEY}"
+                params = {"title": "NodeLoc 升级任务", "desp": status_msg}
+                
+                try:
+                    response = requests.get(url, params=params, timeout=10, impersonate="chrome136")
+                    response.raise_for_status()
+                    logger.success("✅ Server 酱³ 通知发送成功")
+                except Exception as e:
+                    logger.warning(f"⚠️ Server 酱³ 通知发送失败: {e}")
+
+        # 自定义 WeChat API 通知
+        if WECHAT_API_URL and WECHAT_AUTH_TOKEN:
+            try:
+                # 优先尝试 GET 请求 (参考 wxpush 常见用法)
+                params = {
+                    "token": WECHAT_AUTH_TOKEN,
+                    "title": "NodeLoc 升级任务",
+                    "content": status_msg
+                }
+                response = requests.get(WECHAT_API_URL, params=params, timeout=10, impersonate="chrome136")
+                
+                # 如果 GET 失败 (405 Method Not Allowed), 尝试 POST
+                if response.status_code == 405:
+                    logger.debug("自定义微信 GET 返回 405, 尝试 POST")
+                    response = requests.post(WECHAT_API_URL, json=params, timeout=10, impersonate="chrome136")
+                
+                if response.status_code >= 400:
+                     logger.warning(f"⚠️ 自定义微信通知 HTTP {response.status_code}: {response.text[:100]}")
+                else:
+                     logger.success("✅ 自定义微信通知发送成功")
+            except Exception as e:
+                logger.warning(f"⚠️ 自定义微信通知发送失败: {e}")
 
     # ---------------- Run ----------------
     def run(self) -> int:
@@ -636,15 +777,15 @@ class NodeLocUpgrade:
             self.auto_upgrade_tasks()
 
             # 5. 发送通知
+            self.send_notifications()
+            
             summary = (
-                f"NodeLoc 升级任务完成 ✅\n"
-                f"浏览主题: {self.stats['topics_browsed']}\n"
-                f"阅读帖子: {self.stats['posts_read']}\n"
-                f"给出点赞: {self.stats['likes_given']}\n"
-                f"发布回复: {self.stats['replies_posted']}"
+                f"浏览主题: {self.stats['topics_browsed']} | "
+                f"阅读帖子: {self.stats['posts_read']} | "
+                f"点赞: {self.stats['likes_given']} | "
+                f"回复: {self.stats['replies_posted']}"
             )
-            tg_notify(summary)
-            logger.success(summary)
+            logger.success(f"✅ {summary}")
             
             logger.info("==== NodeLoc 快速升级脚本结束 ====")
             return 0
