@@ -55,7 +55,7 @@ apk-get install -y chromium chromium-driver
 
 - **名称**：NodeLoc 快速升级（Selenium）
 - **命令**：`task /ql/data/scripts/nodeloc_upgrade_selenium.py`
-- **定时规则**：`0 9 * * *`（每天早上 9 点）
+- **定时规则**：`0 9 * * *`（每天早上 9 点）跑二次晚上再跑一次`0 21 * * *`。
 ---
 青龙面板使用
 
